@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>動画生成アプリ</title>
+    <style>
+        body {
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        .radio-group {
+            margin-bottom: 15px;
+        }
+        .radio-label {
+            margin-right: 15px;
+            font-weight: normal;
+        }
+        button {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: block;
+            width: 100%;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #2980b9;
+        }
+        .hidden {
+            display: none;
+        }
+        .settings-section {
+            background-color: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 20px;
+        }
+        .settings-title {
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }
+        .settings-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>動画生成アプリ</h1>
+        
+        <form action="/generate" method="post">
+            <div class="form-group">
+                <label>フレーズの選択方法:</label>
+                <div class="radio-group">
+                    <input type="radio" id="custom" name="phrase_type" value="custom" checked onchange="togglePhraseInput()">
+                    <label for="custom" class="radio-label">自分でフレーズを入力</label>
+                    
+                    <input type="radio" id="default" name="phrase_type" value="default" onchange="togglePhraseInput()">
+                    <label for="default" class="radio-label">デフォルトフレーズを使用</label>
+                    
+                    <input type="radio" id="random" name="phrase_type" value="random" onchange="togglePhraseInput()">
+                    <label for="random" class="radio-label">ランダムに選択</label>
+                </div>
+            </div>
+            
+            <div id="custom-phrase-section" class="form-group">
+                <label for="custom_phrase">フレーズを入力:</label>
+                <input type="text" id="custom_phrase" name="custom_phrase" placeholder="例: Never give up. Keep pushing forward. Believe in yourself.">
+                <p><small>ヒント: ピリオド(.)、カンマ(,)、セミコロン(;)で区切ると複数のフレーズに分割されます。</small></p>
+            </div>
+            
+            <div id="default-phrase-section" class="form-group hidden">
+                <label for="default_phrase">デフォルトフレーズを選択:</label>
+                <select id="default_phrase" name="default_phrase">
+                    {% for i, phrase in enumerate(default_phrases) %}
+                    <option value="{{ i }}">{{ phrase }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <div class="settings-section">
+                <div class="settings-title">動画設定</div>
+                <div class="settings-grid">
+                    <div class="form-group">
+                        <label for="resolution">解像度:</label>
+                        <select id="resolution" name="resolution">
+                            {% for key, value in resolutions.items() %}
+                            <option value="{{ key }}">{{ key }} ({{ value[0] }}x{{ value[1] }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="duration">クリップの長さ (秒):</label>
+                        <select id="duration" name="duration">
+                            <option value="3">3秒</option>
+                            <option value="5" selected>5秒</option>
+                            <option value="8">8秒</option>
+                            <option value="10">10秒</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="fps">フレームレート (FPS):</label>
+                        <select id="fps" name="fps">
+                            <option value="24" selected>24 FPS</option>
+                            <option value="30">30 FPS</option>
+                            <option value="60">60 FPS</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-group" style="margin-top: 30px;">
+                <button type="submit">動画を生成</button>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        function togglePhraseInput() {
+            const customSection = document.getElementById('custom-phrase-section');
+            const defaultSection = document.getElementById('default-phrase-section');
+            
+            if (document.getElementById('custom').checked) {
+                customSection.classList.remove('hidden');
+                defaultSection.classList.add('hidden');
+            } else if (document.getElementById('default').checked) {
+                customSection.classList.add('hidden');
+                defaultSection.classList.remove('hidden');
+            } else {
+                customSection.classList.add('hidden');
+                defaultSection.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html> 
