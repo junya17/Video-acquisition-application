@@ -3,13 +3,12 @@ import requests
 import openai
 import random  # ランダム選択のためにrandomモジュールを追加
 from dotenv import load_dotenv
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip, ColorClip, concatenate_audioclips
+from moviepy.audio.AudioClip import AudioClip
 from gtts import gTTS
 import json
 
 # .env ファイルの読み込み
-load_dotenv()
-
 # APIキー設定
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -158,42 +157,89 @@ def create_video_with_audio(video_file, text, speech_file, bgm_file, duration=5,
     try:
         # 動画の準備
         video = VideoFileClip(video_file).resize(target_resolution)
-        clip_duration = min(video.duration, duration)
+        
+        # 音声の長さを取得（音声がある場合）
+        speech_duration = None
+        speech_audio = None
+        if speech_file and os.path.exists(speech_file):
+            try:
+                speech_audio = AudioFileClip(speech_file)
+                speech_duration = speech_audio.duration
+                print(f"音声の長さ: {speech_duration}秒")
+            except Exception as e:
+                print(f"❌ 音声読み込みエラー: {e}")
+                speech_audio = None
+        
+        # クリップの長さを決定
+        if speech_duration:
+            # 音声の長さを基準にする
+            clip_duration = speech_duration
+            print(f"音声の長さに合わせて動画の長さを設定: {clip_duration}秒")
+        else:
+            # 音声がない場合は指定された長さか動画の長さの短い方
+            clip_duration = min(video.duration, duration)
+            print(f"デフォルトの長さを使用: {clip_duration}秒")
+        
+        # 動画を指定の長さに調整
         video = video.subclip(0, clip_duration)
         
-        # テキストの準備（既存のコードと同じ）
+        # テキストの準備
         aspect_ratio = target_resolution[0] / target_resolution[1]
-        fontsize = int(target_resolution[1] * 0.05)
+        fontsize = int(target_resolution[1] * 0.05)  # フォントサイズを画面の5%に
         text_position = ('center', 0.4) if aspect_ratio < 1 else ('center', 'center')
         
-        txt_clip = TextClip(text, fontsize=fontsize, color='white', font='Arial',
-                           stroke_color='black', stroke_width=2)
+        # テキストクリップを作成
+        txt_clip = TextClip(text, 
+                           fontsize=fontsize,
+                           color='white',
+                           font='Arial',
+                           stroke_color='black',
+                           stroke_width=2)
         txt_clip = txt_clip.set_position(text_position).set_duration(clip_duration)
         
-        # 音声の準備
-        speech_audio = AudioFileClip(speech_file)
+        # 音声とBGMの準備
+        audio_clips = []
         
-        # BGMの準備
-        if bgm_file:
-            bgm = AudioFileClip(bgm_file)
-            # BGMを動画の長さに合わせる
-            if bgm.duration < clip_duration:
-                bgm = bgm.loop(duration=clip_duration)
-            else:
-                bgm = bgm.subclip(0, clip_duration)
-            # BGMの音量を下げる
-            bgm = bgm.volumex(0.3)
-            
-            # 音声とBGMを合成
-            final_audio = CompositeVideoClip([speech_audio, bgm]).set_duration(clip_duration)
-        else:
-            final_audio = speech_audio
+        # 音声の追加
+        if speech_audio:
+            audio_clips.append(speech_audio)
         
-        # 動画、テキスト、音声を合成
+        # BGMの追加（BGMがない場合はデフォルトのBGMを使用）
+        if not bgm_file or not os.path.exists(bgm_file):
+            bgm_file = get_random_bgm()
+            print("デフォルトのBGMを使用します")
+        
+        if bgm_file and os.path.exists(bgm_file):
+            try:
+                bgm = AudioFileClip(bgm_file)
+                if bgm.duration < clip_duration:
+                    bgm = bgm.loop(duration=clip_duration)
+                else:
+                    bgm = bgm.subclip(0, clip_duration)
+                
+                # BGMの音量調整
+                if speech_audio:
+                    bgm = bgm.volumex(0.2)  # 音声がある場合は小さめ
+                else:
+                    bgm = bgm.volumex(0.5)  # 音声がない場合は大きめ
+                
+                audio_clips.append(bgm)
+                print(f"✅ BGMを追加: {os.path.basename(bgm_file)}")
+            except Exception as e:
+                print(f"❌ BGM処理エラー: {e}")
+        
+        # 動画とテキストを合成
         final = CompositeVideoClip([video, txt_clip])
-        final = final.set_audio(final_audio)
         
-        return final
+        # 音声を合成して追加
+        if audio_clips:
+            final_audio = concatenate_audioclips(audio_clips)
+            final = final.set_audio(final_audio)
+        
+        return {
+            'clip': final,
+            'duration': clip_duration
+        }
     except Exception as e:
         print(f"❌ 動画処理エラー: {e}")
         return None
@@ -292,7 +338,7 @@ def download_video_for_phrase(phrase):
 def generate_video(text, video_settings=None):
     if video_settings is None:
         video_settings = {
-            'duration': 5,
+            'duration': 5,  # デフォルトの長さを5秒に戻す
             'resolution': (1280, 720),
             'fps': 24
         }
@@ -303,62 +349,119 @@ def generate_video(text, video_settings=None):
         for i, phrase in enumerate(phrases, 1):
             print(f"フレーズ {i}: {phrase}")
         
-        video_files = []
+        video_clips = []  # 動画クリップを保持するリスト
+        text_clips = []   # テキストクリップを保持するリスト
+        audio_clips = []  # 音声クリップを保持するリスト
+        total_duration = 0  # 合計時間
+        
         for i, phrase in enumerate(phrases):
             # 動画のダウンロード
             video_file = download_video_for_phrase(phrase)
             if video_file:
                 try:
-                    # 音声の生成を試みる
+                    # 音声の生成
                     speech_file = create_text_to_speech(phrase)
                 except Exception as e:
                     print(f"音声生成をスキップします: {e}")
                     speech_file = None
                 
+                # 音声の長さを取得
+                if speech_file and os.path.exists(speech_file):
+                    speech_audio = AudioFileClip(speech_file)
+                    clip_duration = speech_audio.duration
+                    print(f"音声の長さ: {clip_duration}秒")
+                else:
+                    clip_duration = video_settings['duration']
+                    print(f"デフォルトの長さを使用: {clip_duration}秒")
+                
                 # BGMの選択
                 bgm_file = get_bgm_for_content(phrase)
                 
-                if speech_file:
-                    # 音声付きの動画を生成
-                    final_clip = create_video_with_audio(
-                        video_file,
-                        phrase,
-                        speech_file,
-                        bgm_file,
-                        duration=video_settings['duration'],
-                        target_resolution=video_settings['resolution']
-                    )
-                else:
-                    # 音声なしの動画を生成
-                    final_clip = create_video_without_audio(
-                        video_file,
-                        phrase,
-                        bgm_file,
-                        duration=video_settings['duration'],
-                        target_resolution=video_settings['resolution']
-                    )
+                # 動画クリップの準備
+                video = VideoFileClip(video_file).resize(video_settings['resolution'])
                 
-                if final_clip:
-                    temp_output = os.path.join(VIDEO_DIR, f'temp_video_{i}.mp4')
-                    final_clip.write_videofile(
-                        temp_output,
-                        fps=video_settings['fps'],
-                        audio_codec='aac'
-                    )
-                    video_files.append(temp_output)
-                    
-                    # 使用済みの音声ファイルを削除
-                    if speech_file and os.path.exists(speech_file):
-                        try:
-                            os.remove(speech_file)
-                        except:
-                            pass
+                # 動画の長さが足りない場合はループ
+                if video.duration < clip_duration:
+                    n_loops = int(clip_duration / video.duration) + 1
+                    video = video.loop(n=n_loops)
+                
+                # 動画クリップを切り出し（音声の長さに合わせる）
+                start_time = 0
+                if video.duration > clip_duration:
+                    # 動画が長い場合、ランダムな開始位置から切り出す
+                    max_start = video.duration - clip_duration
+                    start_time = random.uniform(0, max_start)
+                video = video.subclip(start_time, start_time + clip_duration)
+                
+                # 動画の開始時間を設定
+                video = video.set_start(total_duration)
+                video_clips.append(video)
+                
+                # テキストクリップを追加
+                aspect_ratio = video_settings['resolution'][0] / video_settings['resolution'][1]
+                fontsize = int(video_settings['resolution'][1] * 0.05)
+                text_position = ('center', 0.4) if aspect_ratio < 1 else ('center', 'center')
+                
+                txt_clip = TextClip(
+                    phrase,
+                    fontsize=fontsize,
+                    color='white',
+                    font='Arial',
+                    stroke_color='black',
+                    stroke_width=2
+                )
+                txt_clip = txt_clip.set_position(text_position)
+                txt_clip = txt_clip.set_duration(clip_duration)
+                txt_clip = txt_clip.set_start(total_duration)
+                text_clips.append(txt_clip)
+                
+                # 音声を追加
+                if speech_file and os.path.exists(speech_file):
+                    speech_audio = speech_audio.set_start(total_duration)
+                    audio_clips.append(speech_audio)
+                
+                # BGMを追加
+                if bgm_file and os.path.exists(bgm_file):
+                    try:
+                        bgm = AudioFileClip(bgm_file)
+                        if bgm.duration < clip_duration:
+                            bgm = bgm.loop(duration=clip_duration)
+                        else:
+                            bgm = bgm.subclip(0, clip_duration)
+                        
+                        # BGMの音量調整
+                        if speech_file:
+                            bgm = bgm.volumex(0.2)  # 音声がある場合は小さめ
+                        else:
+                            bgm = bgm.volumex(0.5)  # 音声がない場合は大きめ
+                        
+                        bgm = bgm.set_start(total_duration)
+                        audio_clips.append(bgm)
+                    except Exception as e:
+                        print(f"❌ BGM処理エラー: {e}")
+                
+                # 次のクリップの開始時間を更新
+                total_duration += clip_duration
+                
+                # 使用済みの音声ファイルを削除
+                if speech_file and os.path.exists(speech_file):
+                    try:
+                        os.remove(speech_file)
+                    except:
+                        pass
         
-        if video_files:
+        if video_clips:
             # 最終的な動画を生成
             final_video_path = os.path.join(VIDEO_DIR, 'final_video.mp4')
-            clips = [VideoFileClip(f) for f in video_files]
-            final_video = concatenate_videoclips(clips)
+            
+            # すべてのクリップを合成
+            final_video = CompositeVideoClip(video_clips + text_clips)
+            
+            # 音声を合成して追加
+            if audio_clips:
+                from moviepy.editor import CompositeAudioClip
+                final_audio = CompositeAudioClip(audio_clips)
+                final_video = final_video.set_audio(final_audio)
             
             # 最終動画を書き出し
             final_video.write_videofile(
@@ -366,13 +469,6 @@ def generate_video(text, video_settings=None):
                 fps=video_settings['fps'],
                 audio_codec='aac'
             )
-            
-            # 一時ファイルを削除
-            for file in video_files:
-                try:
-                    os.remove(file)
-                except:
-                    pass
             
             return final_video_path
             
@@ -435,7 +531,6 @@ def get_random_bgm():
     
     if bgm_files:
         # ランダムにBGMを選択
-        import random
         return os.path.join(bgm_dir, random.choice(bgm_files))
     
     return None  # BGMが見つからない場合はNoneを返す
