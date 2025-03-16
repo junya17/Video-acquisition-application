@@ -1,80 +1,76 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>動画生成完了</title>
     <style>
         body {
-            font-family: 'Helvetica Neue', Arial, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 800px;
-            margin: 0 auto;
+            font-family: Arial, sans-serif;
+            margin: 0;
             padding: 20px;
             background-color: #f5f5f5;
         }
-        h1 {
-            color: #2c3e50;
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
             text-align: center;
+        }
+        h1 {
+            color: #333;
             margin-bottom: 30px;
         }
-        .container {
-            background: white;
-            border-radius: 8px;
-            padding: 30px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
-            text-align: center;
-        }
         .success-message {
-            color: #27ae60;
-            font-size: 20px;
+            color: #28a745;
             margin-bottom: 20px;
         }
         .video-container {
-            margin: 30px 0;
+            margin: 20px auto;
+            max-width: 100%;
+            height: 80vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
         }
         video {
             max-width: 100%;
-            border-radius: 4px;
-            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+            max-height: 100%;
+            object-fit: contain;
         }
         .button {
             display: inline-block;
-            background-color: #3498db;
+            padding: 10px 20px;
+            margin: 10px;
+            background-color: #007bff;
             color: white;
             text-decoration: none;
-            padding: 12px 20px;
-            border-radius: 4px;
-            margin: 10px;
+            border-radius: 5px;
             transition: background-color 0.3s;
         }
         .button:hover {
-            background-color: #2980b9;
+            background-color: #0056b3;
         }
         .button.secondary {
-            background-color: #95a5a6;
+            background-color: #6c757d;
         }
         .button.secondary:hover {
-            background-color: #7f8c8d;
+            background-color: #545b62;
+        }
+        .actions {
+            margin-top: 20px;
         }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>動画生成完了</h1>
-        
         <div class="success-message">
-            <p>✅ 動画の生成が完了しました！</p>
+            動画の生成が完了しました！
         </div>
-        
         <div class="video-container">
             <video controls autoplay>
                 <source src="{{ url_for('video_file', filename=video) }}" type="video/mp4">
                 お使いのブラウザは動画の再生に対応していません。
             </video>
         </div>
-        
         <div class="actions">
             <a href="{{ url_for('video_file', filename=video) }}" class="button" download>動画をダウンロード</a>
             <a href="{{ url_for('index') }}" class="button secondary">トップに戻る</a>

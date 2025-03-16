@@ -8,9 +8,12 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB制限
 
 # 動画の解像度オプション
 RESOLUTIONS = {
-    '720p': (1280, 720),
     '1080p': (1920, 1080),
-    '480p': (854, 480)
+    '720p': (1280, 720),
+    '480p': (854, 480),
+    'TikTok縦長': (1080, 1920),  # TikTok形式
+    'Instagram縦長': (1080, 1350),  # Instagram形式
+    'Story縦長': (1080, 1920),  # Instagram/Facebook Story形式
 }
 
 @app.route('/')
@@ -73,4 +76,5 @@ def video_file(filename):
 if __name__ == '__main__':
     # videosディレクトリが存在することを確認
     os.makedirs(video_generator.VIDEO_DIR, exist_ok=True)
-    app.run(debug=True) 
+    # ホストを'0.0.0.0'に設定し、ポート8080を使用
+    app.run(host='0.0.0.0', port=8080, debug=True) 

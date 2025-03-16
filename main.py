@@ -3,7 +3,9 @@ import requests
 import openai
 import random  # ランダム選択のためにrandomモジュールを追加
 from dotenv import load_dotenv
-from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
+from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, AudioFileClip
+from gtts import gTTS
+import json
 
 # .env ファイルの読み込み
 load_dotenv()
@@ -14,7 +16,18 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # 保存フォルダの作成
 VIDEO_DIR = "videos"
-os.makedirs(VIDEO_DIR, exist_ok=True)
+AUDIO_DIR = "audio"
+BGM_DIR = "bgm"
+for dir_path in [VIDEO_DIR, AUDIO_DIR, BGM_DIR]:
+    os.makedirs(dir_path, exist_ok=True)
+
+# BGMカテゴリの定義
+BGM_CATEGORIES = {
+    'inspirational': ['motivation', 'success', 'achieve', 'dream', 'believe'],
+    'peaceful': ['nature', 'peace', 'heal', 'ocean', 'mountain'],
+    'energetic': ['workout', 'push', 'forward', 'never give up'],
+    'emotional': ['love', 'heart', 'feel', 'emotion'],
+}
 
 def split_phrases(text):
     """フレーズを適切に分割"""
@@ -88,24 +101,99 @@ def download_video(video_url, filename):
         print(f"❌ ダウンロードエラー: {e}")
     return None
 
-def create_video_with_text(video_file, text, duration=5, target_resolution=(1280, 720)):
-    """動画にテキストを追加し、指定した解像度にリサイズ"""
+def create_text_to_speech(text, language_code='en'):
+    """テキストを音声に変換（gTTSを使用）"""
     try:
-        video = VideoFileClip(video_file)
-        # 動画の長さを確認してから切り取り
+        # 言語が日本語の場合は設定を変更
+        if is_japanese(text):
+            language_code = 'ja'
+        
+        # 音声ファイルの保存先
+        audio_file = os.path.join(AUDIO_DIR, f'speech_{random.randint(1000, 9999)}.mp3')
+        
+        # gTTSを使用して音声を生成
+        tts = gTTS(text=text, lang=language_code, slow=False)
+        tts.save(audio_file)
+        
+        return audio_file
+    except Exception as e:
+        print(f"❌ 音声生成エラー: {e}")
+        return None
+
+def get_bgm_for_content(text):
+    """テキストの内容に基づいて適切なBGMを選択"""
+    try:
+        # テキストを小文字に変換
+        text_lower = text.lower()
+        
+        # 各カテゴリのスコアを計算
+        category_scores = {}
+        for category, keywords in BGM_CATEGORIES.items():
+            score = sum(1 for keyword in keywords if keyword in text_lower)
+            category_scores[category] = score
+        
+        # 最高スコアのカテゴリを取得
+        best_category = max(category_scores.items(), key=lambda x: x[1])[0]
+        
+        # カテゴリに基づいてBGMを選択
+        category_dir = os.path.join(BGM_DIR, best_category)
+        if os.path.exists(category_dir):
+            bgm_files = [f for f in os.listdir(category_dir) if f.endswith(('.mp3', '.wav'))]
+            if bgm_files:
+                selected_bgm = os.path.join(category_dir, random.choice(bgm_files))
+                print(f"✅ BGM選択: {best_category}/{os.path.basename(selected_bgm)}")
+                return selected_bgm
+        
+        # カテゴリ別のBGMが見つからない場合は、ルートBGMディレクトリから選択
+        root_bgm = get_random_bgm()
+        if root_bgm:
+            print(f"✅ BGM選択: {os.path.basename(root_bgm)}")
+        return root_bgm
+    except Exception as e:
+        print(f"❌ BGM選択エラー: {e}")
+        return None
+
+def create_video_with_audio(video_file, text, speech_file, bgm_file, duration=5, target_resolution=(1280, 720)):
+    """動画、テキスト、音声、BGMを組み合わせる"""
+    try:
+        # 動画の準備
+        video = VideoFileClip(video_file).resize(target_resolution)
         clip_duration = min(video.duration, duration)
         video = video.subclip(0, clip_duration)
         
-        # 動画を指定した解像度にリサイズ
-        video = video.resize(target_resolution)
+        # テキストの準備（既存のコードと同じ）
+        aspect_ratio = target_resolution[0] / target_resolution[1]
+        fontsize = int(target_resolution[1] * 0.05)
+        text_position = ('center', 0.4) if aspect_ratio < 1 else ('center', 'center')
         
-        text_clip = TextClip(
-            text, fontsize=50, color='white', stroke_color='black', stroke_width=2,
-            size=(video.w * 0.8, None), method="caption", font='Arial-Bold'
-        ).set_position("bottom").set_duration(clip_duration)
+        txt_clip = TextClip(text, fontsize=fontsize, color='white', font='Arial',
+                           stroke_color='black', stroke_width=2)
+        txt_clip = txt_clip.set_position(text_position).set_duration(clip_duration)
         
-        final_clip = CompositeVideoClip([video, text_clip])
-        return final_clip
+        # 音声の準備
+        speech_audio = AudioFileClip(speech_file)
+        
+        # BGMの準備
+        if bgm_file:
+            bgm = AudioFileClip(bgm_file)
+            # BGMを動画の長さに合わせる
+            if bgm.duration < clip_duration:
+                bgm = bgm.loop(duration=clip_duration)
+            else:
+                bgm = bgm.subclip(0, clip_duration)
+            # BGMの音量を下げる
+            bgm = bgm.volumex(0.3)
+            
+            # 音声とBGMを合成
+            final_audio = CompositeVideoClip([speech_audio, bgm]).set_duration(clip_duration)
+        else:
+            final_audio = speech_audio
+        
+        # 動画、テキスト、音声を合成
+        final = CompositeVideoClip([video, txt_clip])
+        final = final.set_audio(final_audio)
+        
+        return final
     except Exception as e:
         print(f"❌ 動画処理エラー: {e}")
         return None
@@ -162,9 +250,46 @@ def get_english_keywords(japanese_text):
     
     return english_keywords
 
+def download_video_for_phrase(phrase):
+    """フレーズに基づいて動画を検索してダウンロード"""
+    # 日本語かどうかを判定
+    is_jp = is_japanese(phrase)
+    
+    # 検索クエリを最適化
+    if is_jp:
+        # 日本語の場合は英語キーワードに変換
+        english_keywords = get_english_keywords(phrase)
+        search_queries = english_keywords + ["inspiration", "motivation", "nature"]
+        print(f"日本語フレーズを検出: '{phrase}'")
+        print(f"英語キーワードに変換: {', '.join(english_keywords)}")
+    else:
+        # 英語の場合は従来の方法
+        words = phrase.split()
+        search_queries = [
+            " ".join(words[:3]) if len(words) > 3 else phrase,  # 最初の3単語
+            " ".join(words[:2]) if len(words) >= 2 else phrase,  # 最初の2単語
+            words[0] if words else "nature",                     # 最初の1単語
+            "inspiration" if "inspire" in phrase.lower() else None,  # インスピレーション関連
+            "success" if any(w in phrase.lower() for w in ["success", "achieve", "goal"]) else None,  # 成功関連
+            "motivation" if any(w in phrase.lower() for w in ["motivate", "push", "forward"]) else None,  # モチベーション関連
+            "nature"  # 最終バックアップ
+        ]
+        # Noneを除去
+        search_queries = [q for q in search_queries if q]
+    
+    # 各クエリを試す
+    for query in search_queries:
+        video_url = get_video_from_pexels(query)
+        if video_url:
+            print(f"✅ クエリ '{query}' で動画を見つけました")
+            filename = os.path.join(VIDEO_DIR, f"video_{random.randint(1000, 9999)}.mp4")
+            if download_video(video_url, filename):
+                return filename
+    
+    print(f"❌ フレーズ '{phrase}' に対する動画が見つかりませんでした")
+    return None
+
 def generate_video(text, video_settings=None):
-    """フレーズごとに動画を取得し、結合"""
-    # デフォルト設定
     if video_settings is None:
         video_settings = {
             'duration': 5,
@@ -172,89 +297,148 @@ def generate_video(text, video_settings=None):
             'fps': 24
         }
     
-    phrases = split_phrases(text)
-    print(f"\n{len(phrases)}個のフレーズに分割しました:")
-    for i, phrase in enumerate(phrases):
-        print(f"フレーズ {i+1}: {phrase}")
-    
-    video_clips = []
-    temp_files = []  # 一時ファイルのリストを保持
-
     try:
+        phrases = split_phrases(text)
+        print(f"\n{len(phrases)}個のフレーズに分割しました:")
+        for i, phrase in enumerate(phrases, 1):
+            print(f"フレーズ {i}: {phrase}")
+        
+        video_files = []
         for i, phrase in enumerate(phrases):
-            # 日本語かどうかを判定
-            is_jp = is_japanese(phrase)
-            
-            # 検索クエリを最適化
-            if is_jp:
-                # 日本語の場合は英語キーワードに変換
-                english_keywords = get_english_keywords(phrase)
-                search_queries = english_keywords + ["inspiration", "motivation", "nature"]
-                print(f"日本語フレーズを検出: '{phrase}'")
-                print(f"英語キーワードに変換: {', '.join(english_keywords)}")
-            else:
-                # 英語の場合は従来の方法
-                words = phrase.split()
-                search_queries = [
-                    " ".join(words[:3]) if len(words) > 3 else phrase,  # 最初の3単語
-                    " ".join(words[:2]) if len(words) >= 2 else phrase,  # 最初の2単語
-                    words[0] if words else "nature",                     # 最初の1単語
-                    "inspiration" if "inspire" in phrase.lower() else None,  # インスピレーション関連
-                    "success" if any(w in phrase.lower() for w in ["success", "achieve", "goal"]) else None,  # 成功関連
-                    "motivation" if any(w in phrase.lower() for w in ["motivate", "push", "forward"]) else None,  # モチベーション関連
-                    "nature"  # 最終バックアップ
-                ]
-                # Noneを除去
-                search_queries = [q for q in search_queries if q]
-            
-            # 各クエリを試す
-            video_url = None
-            for query in search_queries:
-                video_url = get_video_from_pexels(query)
-                if video_url:
-                    print(f"✅ クエリ '{query}' で動画を見つけました")
-                    break
-            
-            if video_url:
-                filename = os.path.join(VIDEO_DIR, f"video_{i}.mp4")
-                temp_files.append(filename)  # 一時ファイルリストに追加
+            # 動画のダウンロード
+            video_file = download_video_for_phrase(phrase)
+            if video_file:
+                try:
+                    # 音声の生成を試みる
+                    speech_file = create_text_to_speech(phrase)
+                except Exception as e:
+                    print(f"音声生成をスキップします: {e}")
+                    speech_file = None
                 
-                if download_video(video_url, filename):
-                    clip = create_video_with_text(
-                        filename, 
-                        phrase, 
+                # BGMの選択
+                bgm_file = get_bgm_for_content(phrase)
+                
+                if speech_file:
+                    # 音声付きの動画を生成
+                    final_clip = create_video_with_audio(
+                        video_file,
+                        phrase,
+                        speech_file,
+                        bgm_file,
                         duration=video_settings['duration'],
                         target_resolution=video_settings['resolution']
                     )
-                    if clip:
-                        video_clips.append(clip)
-
-        if video_clips:
-            final_clip = concatenate_videoclips(video_clips, method="compose")
-            final_video_path = os.path.join(VIDEO_DIR, "final_video.mp4")
-            final_clip.write_videofile(
-                final_video_path, 
-                codec="libx264", 
-                fps=video_settings['fps']
+                else:
+                    # 音声なしの動画を生成
+                    final_clip = create_video_without_audio(
+                        video_file,
+                        phrase,
+                        bgm_file,
+                        duration=video_settings['duration'],
+                        target_resolution=video_settings['resolution']
+                    )
+                
+                if final_clip:
+                    temp_output = os.path.join(VIDEO_DIR, f'temp_video_{i}.mp4')
+                    final_clip.write_videofile(
+                        temp_output,
+                        fps=video_settings['fps'],
+                        audio_codec='aac'
+                    )
+                    video_files.append(temp_output)
+                    
+                    # 使用済みの音声ファイルを削除
+                    if speech_file and os.path.exists(speech_file):
+                        try:
+                            os.remove(speech_file)
+                        except:
+                            pass
+        
+        if video_files:
+            # 最終的な動画を生成
+            final_video_path = os.path.join(VIDEO_DIR, 'final_video.mp4')
+            clips = [VideoFileClip(f) for f in video_files]
+            final_video = concatenate_videoclips(clips)
+            
+            # 最終動画を書き出し
+            final_video.write_videofile(
+                final_video_path,
+                fps=video_settings['fps'],
+                audio_codec='aac'
             )
-            print(f"✅ 動画作成完了: {final_video_path}")
-            return final_video_path
-        else:
-            print("❌ 動画が生成できませんでした。")
-            return None
-    
-    except Exception as e:
-        print(f"❌ 予期せぬエラーが発生しました: {e}")
-        return None
-    
-    finally:
-        # 一時ファイルの削除
-        for file in temp_files:
-            if os.path.exists(file):
+            
+            # 一時ファイルを削除
+            for file in video_files:
                 try:
                     os.remove(file)
-                except Exception as e:
-                    print(f"一時ファイル削除エラー: {e}")
+                except:
+                    pass
+            
+            return final_video_path
+            
+    except Exception as e:
+        print(f"❌ 動画生成エラー: {e}")
+        return None
+
+def create_video_without_audio(video_file, text, bgm_file, duration=5, target_resolution=(1280, 720)):
+    """音声なしで動画、テキスト、BGMを組み合わせる"""
+    try:
+        # 動画の準備
+        video = VideoFileClip(video_file).resize(target_resolution)
+        clip_duration = min(video.duration, duration)
+        video = video.subclip(0, clip_duration)
+        
+        # テキストの準備
+        aspect_ratio = target_resolution[0] / target_resolution[1]
+        fontsize = int(target_resolution[1] * 0.05)
+        text_position = ('center', 0.4) if aspect_ratio < 1 else ('center', 'center')
+        
+        txt_clip = TextClip(text, fontsize=fontsize, color='white', font='Arial',
+                           stroke_color='black', stroke_width=2)
+        txt_clip = txt_clip.set_position(text_position).set_duration(clip_duration)
+        
+        # BGMの準備
+        if bgm_file and os.path.exists(bgm_file):
+            try:
+                bgm = AudioFileClip(bgm_file)
+                # BGMを動画の長さに合わせる
+                if bgm.duration < clip_duration:
+                    bgm = bgm.loop(duration=clip_duration)
+                else:
+                    bgm = bgm.subclip(0, clip_duration)
+                # BGMの音量を調整
+                bgm = bgm.volumex(0.5)  # 音声がないので、BGMの音量を少し上げる
+                
+                # 動画とテキストを合成
+                final = CompositeVideoClip([video, txt_clip])
+                final = final.set_audio(bgm)
+            except Exception as e:
+                print(f"❌ BGM処理エラー: {e}")
+                final = CompositeVideoClip([video, txt_clip])
+        else:
+            # BGMなしの場合
+            final = CompositeVideoClip([video, txt_clip])
+        
+        return final
+    except Exception as e:
+        print(f"❌ 動画処理エラー: {e}")
+        return None
+
+def get_random_bgm():
+    """ランダムなBGMファイルを返す関数"""
+    # BGMフォルダのパスを設定
+    bgm_dir = os.path.join(os.path.dirname(__file__), 'bgm')
+    os.makedirs(bgm_dir, exist_ok=True)
+    
+    # BGMファイルのリストを取得
+    bgm_files = [f for f in os.listdir(bgm_dir) if f.endswith(('.mp3', '.wav'))]
+    
+    if bgm_files:
+        # ランダムにBGMを選択
+        import random
+        return os.path.join(bgm_dir, random.choice(bgm_files))
+    
+    return None  # BGMが見つからない場合はNoneを返す
 
 # テスト用のフレーズ
 default_phrases = [
